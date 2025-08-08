@@ -1,7 +1,8 @@
 {
-  "name": "my-v0-project",
+  "name": "AntennaLab",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "homepage": "https://github.com/ibrobertson/AntennaLab",
   "scripts": {
     "build": "next build",
     "dev": "next dev",
@@ -86,11 +87,5 @@
   "type": "commonjs",
   "bugs": {
     "url": "https://github.com/ibrobertson/AntennaLab/issues"
-  },
-  "homepage": "https://github.com/ibrobertson/AntennaLab/"
   }
-  
-  "scripts": {
-  "predeploy": "npm run build",
-  "deploy": "gh-pages -d build"
-  }
+}
