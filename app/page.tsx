@@ -263,31 +263,29 @@ export default function Home() {
       </header>
 
       <main className="flex-1 container py-4">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-          {/* Left column - Visualization */}
-          <div className="lg:col-span-3 space-y-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle>Antenna Visualization</CardTitle>
-                <CardDescription>Interactive 3D model with current/voltage distribution</CardDescription>
-              </CardHeader>
-              <CardContent className="h-[420px]">
-                <AntennaVisualization 
-                  antennaData={antennaData} 
-                  antennaModel={antennaModel}
-                  animationTime={animationTime}
-                  visibility={visibility}
-                  setVisibility={setVisibility}
-                  isAnimating={isAnimating}
-                  setIsAnimating={setIsAnimating}
-                  setAnimationTime={setAnimationTime}
-                />
-              </CardContent>
-            </Card>
-          </div>
+        <div className="space-y-4">
+          {/* Visualization */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle>Antenna Visualization</CardTitle>
+              <CardDescription>Interactive 3D model with current/voltage distribution</CardDescription>
+            </CardHeader>
+            <CardContent className="h-[420px]">
+              <AntennaVisualization 
+                antennaData={antennaData} 
+                antennaModel={antennaModel}
+                animationTime={animationTime}
+                visibility={visibility}
+                setVisibility={setVisibility}
+                isAnimating={isAnimating}
+                setIsAnimating={setIsAnimating}
+                setAnimationTime={setAnimationTime}
+              />
+            </CardContent>
+          </Card>
 
-          {/* Right column - Controls */}
-          <div className="space-y-4">
+          {/* Controls row - Parameters and Analysis side by side */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Antenna Parameters */}
             <Card>
               <CardHeader className="pb-2">
@@ -520,7 +518,7 @@ export default function Home() {
             © 2025 AntennaLab. Educational RF analysis tool.
           </p>
         </div>
-      </footer>
+	  </footer>
     </div>
   )
-}
+} // Close the Home() function
