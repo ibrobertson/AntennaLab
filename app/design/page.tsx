@@ -18,13 +18,13 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useToast } from "@/hooks/use-toast"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { ArrowLeft, Download, Radio, Save, Share2 } from 'lucide-react'
 import { useForm } from "react-hook-form"
 import * as z from "zod"
 import AntennaVisualization from "@/components/antenna-visualization"
 import AntennaPerformance from "@/components/antenna-performance"
+import { toast } from "sonner"
 
 const formSchema = z.object({
   antennaType: z.string(),
@@ -37,7 +37,7 @@ const formSchema = z.object({
 })
 
 export default function DesignPage() {
-  const { toast } = useToast()
+  // No need to destructure toast, it's directly imported
   const [activeTab, setActiveTab] = useState("design")
   const [antennaData, setAntennaData] = useState({
     type: "dipole",
@@ -73,31 +73,19 @@ export default function DesignPage() {
       material: values.material,
     })
 
-    toast({
-      title: "Antenna design updated",
-      description: "Your antenna design has been updated and simulation results recalculated.",
-    })
+    toast("Antenna design updated", { description: "Your antenna design has been updated and simulation results recalculated." })
   }
 
   function saveDesign() {
-    toast({
-      title: "Design saved",
-      description: "Your antenna design has been saved to your account.",
-    })
+    toast("Design saved", { description: "Your antenna design has been saved to your account." })
   }
 
   function exportDesign() {
-    toast({
-      title: "Design exported",
-      description: "Your antenna design has been exported as a JSON file.",
-    })
+    toast("Design exported", { description: "Your antenna design has been exported as a JSON file." })
   }
 
   function shareDesign() {
-    toast({
-      title: "Design shared",
-      description: "A shareable link has been copied to your clipboard.",
-    })
+    toast("Design shared", { description: "A shareable link has been copied to your clipboard." })
   }
 
   return (
