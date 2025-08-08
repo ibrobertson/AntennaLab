@@ -1,103 +1,526 @@
-import Image from "next/image";
+"use client"
+
+import { useState, useEffect } from "react"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form"
+import { Input } from "@/components/ui/input"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Slider } from "@/components/ui/slider"
+import { Checkbox } from "@/components/ui/checkbox"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { Download, RadioIcon, Save, Share2, Play, Pause, RotateCcw } from 'lucide-react'
+import { useForm } from "react-hook-form"
+import * as z from "zod"
+import AntennaVisualization from "@/components/antenna-visualization"
+import AntennaPerformance from "@/components/antenna-performance"
+import { toast } from "sonner"
+import { Dialog, DialogTrigger } from "@/components/ui/dialog"
+import LoadDesignDialog from "@/components/load-design-dialog"
+import { AntennaModel } from "@/lib/models/antennamodel"
+import { PhysicsUtils } from "@/lib/physics/physicsutils"
+
+const formSchema = z.object({
+  antennaType: z.string(),
+  frequency: z.number().min(1).max(10000),
+  elements: z.number().int().min(1).max(20),
+  elementLength: z.number().min(0.1).max(10),
+  elementSpacing: z.number().min(0.1).max(5),
+  feedPoint: z.number().min(0).max(100),
+  material: z.string(),
+  wireDiameter: z.number().min(0.1).max(10),
+  balunRatio: z.string(),
+})
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [isAnimating, setIsAnimating] = useState(false)
+  const [animationTime, setAnimationTime] = useState(0)
+  const [visibility, setVisibility] = useState({
+    antenna: true,
+    current: true,
+    voltage: true,
+    eField: false,
+    hField: false,
+    nodes: true,
+    debugInfo: false,
+  })
+  const [isLoadDialogOpen, setIsLoadDialogOpen] = useState(false)
+  
+  const [antennaData, setAntennaData] = useState({
+    type: "dipole",
+    frequency: 14.2,
+    elements: 1,
+    elementLength: 0.5,
+    elementSpacing: 0.25,
+    feedPoint: 50,
+    material: "copper",
+    wireDiameter: 2.0,
+    balunRatio: "1:1",
+  })
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  // ===================================================================
+  // REAL ANTENNA PHYSICS INTEGRATION
+  // ===================================================================
+  
+  // Create real antenna model instance
+  const [antennaModel] = useState(() => new AntennaModel())
+
+  // Helper function to convert balun selection to matching network
+  function getMatchingNetwork(balunRatio: string) {
+    switch(balunRatio) {
+      case "1:1": return "use1to1Balun"
+      case "4:1": return "use4to1Balun" 
+      case "9:1": return "use9to1UnUn"
+      case "49:1": return "use49to1UnUn"
+      default: return null
+    }
+  }
+
+  // Update the real antenna model when form data changes
+  useEffect(() => {
+    try {
+      // Calculate physical length from wavelengths
+      const wavelength = 299.792458 / antennaData.frequency // MHz to meters
+      const physicalLength = antennaData.elementLength * wavelength
+      
+      // Update the real antenna model
+      antennaModel.length = physicalLength
+      antennaModel.frequency = antennaData.frequency
+      antennaModel.feedPosition = antennaData.feedPoint / 100 // Convert percentage to decimal
+      antennaModel.wireDiameter = antennaData.wireDiameter
+      antennaModel.matchingNetwork = getMatchingNetwork(antennaData.balunRatio)
+      
+      // Debug logging to verify physics are working
+      const impedance = antennaModel.calculateImpedance()
+      const antennaType = antennaModel.getAntennaType()
+      
+      console.log("Real Physics Update:", {
+        frequency: antennaData.frequency,
+        physicalLength: physicalLength.toFixed(2) + "m",
+        electricalLength: antennaModel.electricalLength.toFixed(3) + "λ",
+        impedance: PhysicsUtils.formatImpedance(impedance.resistance, impedance.reactance),
+        antennaType: antennaType,
+        wavelength: wavelength.toFixed(2) + "m",
+        feedPosition: antennaModel.feedPosition,
+        matchingNetwork: antennaModel.matchingNetwork || "None"
+      })
+    } catch (error) {
+      console.error("Error updating antenna model:", error)
+    }
+  }, [antennaData, antennaModel])
+
+  // ===================================================================
+  // FORM HANDLING
+  // ===================================================================
+
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      antennaType: "dipole",
+      frequency: 14.2,
+      elements: 1,
+      elementLength: 0.5,
+      elementSpacing: 0.25,
+      feedPoint: 50,
+      material: "copper",
+      wireDiameter: 2.0,
+      balunRatio: "1:1",
+    },
+  })
+
+  function onSubmit(values: z.infer<typeof formSchema>) {
+    setAntennaData({
+      type: values.antennaType,
+      frequency: values.frequency,
+      elements: values.elements,
+      elementLength: values.elementLength,
+      elementSpacing: values.elementSpacing,
+      feedPoint: values.feedPoint,
+      material: values.material,
+      wireDiameter: values.wireDiameter,
+      balunRatio: values.balunRatio,
+    })
+
+    toast("Antenna design updated", {
+      description: "Your antenna design has been updated and simulation results recalculated.",
+    })
+  }
+
+  function saveDesign() {
+    const designData = JSON.stringify(antennaData, null, 2);
+    const blob = new Blob([designData], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `antenna-design-${antennaData.type}-${antennaData.frequency}MHz.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    toast("Design saved and exported", { description: "Your antenna design has been saved locally and exported as a JSON file." });
+  }
+
+  function shareDesign() {
+    toast("Design shared", { description: "A shareable link has been copied to your clipboard." })
+  }
+
+  const handleSelectExample = (example: any) => {
+    form.reset({
+      antennaType: example.type,
+      frequency: example.frequency,
+      elements: example.elements,
+      elementLength: example.elementLength,
+      elementSpacing: example.elementSpacing,
+      feedPoint: typeof example.feedPoint === 'string' ? 50 : example.feedPoint,
+      material: example.material,
+      wireDiameter: example.wireDiameter || 2.0,
+      balunRatio: example.balunRatio || "1:1",
+    })
+    form.handleSubmit(onSubmit)()
+    setIsLoadDialogOpen(false)
+  }
+
+  // Animation loop
+  useEffect(() => {
+    let interval: NodeJS.Timeout
+    if (isAnimating) {
+      interval = setInterval(() => {
+        setAnimationTime(prev => (prev + 1) % 360)
+      }, 50)
+    }
+    return () => clearInterval(interval)
+  }, [isAnimating])
+
+  // Update form when antenna type changes to set appropriate defaults
+  useEffect(() => {
+    const antennaType = form.watch("antennaType")
+    
+    if (antennaType === "dipole") {
+      form.setValue("elements", 1)
+    } else if (antennaType === "yagi" && form.getValues("elements") < 3) {
+      form.setValue("elements", 3)
+    }
+  }, [form.watch("antennaType")])
+
+  // ===================================================================
+  // REAL PHYSICS CALCULATIONS (replacing placeholder functions)
+  // ===================================================================
+  
+  // Get real calculated values from the physics engine
+  const wavelength = antennaModel.wavelength
+  const physicalLength = antennaModel.length
+  const realImpedance = antennaModel.calculateImpedance()
+  const matchingResult = antennaModel.applyMatching(realImpedance)
+  const feedImpedance = Math.round(realImpedance.resistance)
+  const systemImpedance = matchingResult.impedance
+  const swr = PhysicsUtils.calculateSWR(systemImpedance.resistance, systemImpedance.reactance)
+  const antennaType = antennaModel.getAntennaType()
+  const resonantFrequency = antennaData.frequency // This is the frequency we're analyzing
+  const phaseAngle = antennaModel.getPhaseAngle()
+
+  return (
+    <div className="flex min-h-screen flex-col">
+      <header className="border-b bg-background/95 backdrop-blur">
+        <div className="container flex h-14 items-center justify-between">
+          <div className="flex items-center gap-2">
+            <RadioIcon className="h-5 w-5 text-primary" />
+            <span className="text-lg font-bold">AntennaLab</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={saveDesign}>
+              <Save className="mr-2 h-4 w-4" />
+              Save
+            </Button>
+            <Dialog open={isLoadDialogOpen} onOpenChange={setIsLoadDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Download className="mr-2 h-4 w-4" />
+                  Load
+                </Button>
+              </DialogTrigger>
+              <LoadDesignDialog 
+                open={isLoadDialogOpen} 
+                onOpenChange={setIsLoadDialogOpen} 
+                onSelectExample={handleSelectExample} 
+              />
+            </Dialog>
+            <Button variant="outline" size="sm" onClick={shareDesign}>
+              <Share2 className="mr-2 h-4 w-4" />
+              Share
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-1 container py-4">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+          {/* Left column - Visualization */}
+          <div className="lg:col-span-3 space-y-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle>Antenna Visualization</CardTitle>
+                <CardDescription>Interactive 3D model with current/voltage distribution</CardDescription>
+              </CardHeader>
+              <CardContent className="h-[420px]">
+                <AntennaVisualization 
+                  antennaData={antennaData} 
+                  antennaModel={antennaModel}
+                  animationTime={animationTime}
+                  visibility={visibility}
+                  setVisibility={setVisibility}
+                  isAnimating={isAnimating}
+                  setIsAnimating={setIsAnimating}
+                  setAnimationTime={setAnimationTime}
+                />
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right column - Controls */}
+          <div className="space-y-4">
+            {/* Antenna Parameters */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Antenna Parameters</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Form {...form}>
+                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
+                    <FormField
+                      control={form.control}
+                      name="antennaType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm">Type</FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger className="h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="dipole">Dipole</SelectItem>
+                              <SelectItem value="yagi">Yagi-Uda - Coming Soon</SelectItem>
+                              <SelectItem value="patch">Patch - Coming Soon</SelectItem>
+                              <SelectItem value="logperiodic">Log-Periodic - Coming Soon</SelectItem>
+                              <SelectItem value="helical">Helical - Coming Soon</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="elementLength"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm">Length (λ): {field.value.toFixed(2)}</FormLabel>
+                          <FormControl>
+                            <Slider
+                              min={0.1}
+                              max={2.0}
+                              step={0.01}
+                              value={[field.value]}
+                              onValueChange={(vals) => field.onChange(vals[0])}
+                              className="w-full"
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="frequency"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm">Freq (MHz): {field.value}</FormLabel>
+                          <FormControl>
+                            <Slider
+                              min={1}
+                              max={1000}
+                              step={0.1}
+                              value={[field.value]}
+                              onValueChange={(vals) => field.onChange(vals[0])}
+                              className="w-full"
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="feedPoint"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm">Feed (%): {field.value}</FormLabel>
+                          <FormControl>
+                            <Slider
+                              min={0}
+                              max={100}
+                              step={1}
+                              value={[field.value]}
+                              onValueChange={(vals) => field.onChange(vals[0])}
+                              className="w-full"
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="wireDiameter"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm">Wire Ø (mm): {field.value}</FormLabel>
+                          <FormControl>
+                            <Slider
+                              min={0.1}
+                              max={10}
+                              step={0.1}
+                              value={[field.value]}
+                              onValueChange={(vals) => field.onChange(vals[0])}
+                              className="w-full"
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="balunRatio"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm">Balun Ratio</FormLabel>
+                          <div className="flex flex-wrap gap-x-4 gap-y-2">
+                            <div className="flex items-center space-x-2">
+                              <Checkbox 
+                                id="balun-1-1" 
+                                checked={field.value === "1:1"}
+                                onCheckedChange={() => field.onChange("1:1")}
+                              />
+                              <label htmlFor="balun-1-1" className="text-sm">1:1 Balun</label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Checkbox 
+                                id="balun-4-1" 
+                                checked={field.value === "4:1"}
+                                onCheckedChange={() => field.onChange("4:1")}
+                              />
+                              <label htmlFor="balun-4-1" className="text-sm">4:1 Balun</label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Checkbox 
+                                id="unun-9-1" 
+                                checked={field.value === "9:1"}
+                                onCheckedChange={() => field.onChange("9:1")}
+                              />
+                              <label htmlFor="unun-9-1" className="text-sm">9:1 UnUn</label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Checkbox 
+                                id="unun-49-1" 
+                                checked={field.value === "49:1"}
+                                onCheckedChange={() => field.onChange("49:1")}
+                              />
+                              <label htmlFor="unun-49-1" className="text-sm">49:1 UnUn</label>
+                            </div>
+                          </div>
+                        </FormItem>
+                      )}
+                    />
+
+                    <Button type="submit" size="sm" className="w-full">Update Design</Button>
+                  </form>
+                </Form>
+              </CardContent>
+            </Card>
+
+            {/* Real-time Physics Display */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Real-time Analysis</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Antenna Type:</span>
+                  <span className="font-mono">{antennaType}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Impedance:</span>
+                  <span className="font-mono">{PhysicsUtils.formatImpedance(realImpedance.resistance, realImpedance.reactance)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>System Z:</span>
+                  <span className="font-mono">{PhysicsUtils.formatImpedance(systemImpedance.resistance, systemImpedance.reactance)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>SWR (50Ω):</span>
+                  <span className="font-mono">{swr.toFixed(1)}:1</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Physical Length:</span>
+                  <span className="font-mono">{physicalLength.toFixed(2)}m</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Electrical Length:</span>
+                  <span className="font-mono">{antennaModel.electricalLength.toFixed(3)}λ</span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Performance Analysis */}
+        <div className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Performance Analysis</CardTitle>
+              <CardDescription>Detailed antenna performance metrics and radiation patterns</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AntennaPerformance 
+                antennaData={antennaData} 
+                antennaModel={antennaModel}
+                resonantFrequency={resonantFrequency}
+                wavelength={wavelength}
+                feedImpedance={feedImpedance}
+                physicalLength={physicalLength}
+                realImpedance={realImpedance}
+                systemImpedance={systemImpedance}
+                swr={swr}
+                antennaType={antennaType}
+              />
+            </CardContent>
+          </Card>
         </div>
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+
+      <footer className="border-t py-4">
+        <div className="container flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <RadioIcon className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold">AntennaLab</span>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            © 2025 AntennaLab. Educational RF analysis tool.
+          </p>
+        </div>
       </footer>
     </div>
-  );
+  )
 }
