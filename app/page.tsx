@@ -33,7 +33,7 @@ const formSchema = z.object({
   antennaType: z.string(),
   frequency: z.number().min(1).max(10000),
   elements: z.number().int().min(1).max(20),
-  elementLength: z.number().min(0.1).max(10),
+  elementLength: z.number().min(0.01).max(50),
   elementSpacing: z.number().min(0.1).max(5),
   feedPoint: z.number().min(0).max(100),
   material: z.string(),
@@ -59,12 +59,12 @@ export default function Home() {
     type: "dipole",
     frequency: 14.2,
     elements: 1,
-    elementLength: 0.5,
+    elementLength: 10.6,
     elementSpacing: 0.25,
     feedPoint: 50,
     material: "copper",
     wireDiameter: 2.0,
-    balunRatio: "1:1",
+    balunRatio: "None",
   })
 
   // ===================================================================
@@ -88,12 +88,11 @@ export default function Home() {
   // Update the real antenna model when form data changes
   useEffect(() => {
     try {
-      // Calculate physical length from wavelengths
-      const wavelength = 299.792458 / antennaData.frequency // MHz to meters
-      const physicalLength = antennaData.elementLength * wavelength
+      // elementLength is now in meters (physical length)
+      const wavelength = antennaModel.wavelength
       
       // Update the real antenna model
-      antennaModel.length = physicalLength
+      antennaModel.length = antennaData.elementLength
       antennaModel.frequency = antennaData.frequency
       antennaModel.feedPosition = antennaData.feedPoint / 100 // Convert percentage to decimal
       antennaModel.wireDiameter = antennaData.wireDiameter
@@ -105,7 +104,7 @@ export default function Home() {
       
       console.log("Real Physics Update:", {
         frequency: antennaData.frequency,
-        physicalLength: physicalLength.toFixed(2) + "m",
+        physicalLength: antennaData.elementLength.toFixed(2) + "m",
         electricalLength: antennaModel.electricalLength.toFixed(3) + "λ",
         impedance: PhysicsUtils.formatImpedance(impedance.resistance, impedance.reactance),
         antennaType: antennaType,
@@ -128,12 +127,12 @@ export default function Home() {
       antennaType: "dipole",
       frequency: 14.2,
       elements: 1,
-      elementLength: 0.5,
+      elementLength: 10.6,
       elementSpacing: 0.25,
       feedPoint: 50,
       material: "copper",
       wireDiameter: 2.0,
-      balunRatio: "1:1",
+      balunRatio: "None",
     },
   })
 
@@ -190,15 +189,23 @@ export default function Home() {
     setIsLoadDialogOpen(false)
   }
 
-  // Animation loop
+  // Animation loop - updates by whole degrees
   useEffect(() => {
     let interval: NodeJS.Timeout
     if (isAnimating) {
       interval = setInterval(() => {
-        setAnimationTime(prev => (prev + 1) % 360)
-      }, 50)
+        setAnimationTime(prev => {
+          // Increment by 1 degree per frame for clean display
+          const increment = 1
+          return (prev + increment) % 360
+        })
+      }, 25) // 25ms interval = 40 fps, fast cycle through 360 degrees
     }
-    return () => clearInterval(interval)
+    return () => {
+      if (interval) {
+        clearInterval(interval)
+      }
+    }
   }, [isAnimating])
 
   // Update form when antenna type changes to set appropriate defaults
@@ -211,6 +218,24 @@ export default function Home() {
       form.setValue("elements", 3)
     }
   }, [form.watch("antennaType")])
+
+  // Watch form values and update antennaData in real-time
+  useEffect(() => {
+    const subscription = form.watch((values) => {
+      setAntennaData({
+        type: values.antennaType || "dipole",
+        frequency: values.frequency || 14.2,
+        elements: values.elements || 1,
+        elementLength: values.elementLength || 10.6,
+        elementSpacing: values.elementSpacing || 0.25,
+        feedPoint: values.feedPoint || 50,
+        material: values.material || "copper",
+        wireDiameter: values.wireDiameter || 2.0,
+        balunRatio: values.balunRatio || "None",
+      })
+    })
+    return () => subscription.unsubscribe()
+  }, [form.watch])
 
   // ===================================================================
   // REAL PHYSICS CALCULATIONS (replacing placeholder functions)
@@ -284,10 +309,8 @@ export default function Home() {
             </CardContent>
           </Card>
 
-          {/* Controls row - Parameters and Analysis side by side */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Antenna Parameters */}
-            <Card>
+          {/* Antenna Parameters - Full width */}
+          <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Antenna Parameters</CardTitle>
               </CardHeader>
@@ -323,11 +346,11 @@ export default function Home() {
                       name="elementLength"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="text-sm">Length (λ): {field.value.toFixed(2)}</FormLabel>
+                          <FormLabel className="text-sm">Length (m): {field.value.toFixed(2)}</FormLabel>
                           <FormControl>
                             <Slider
-                              min={0.1}
-                              max={2.0}
+                              min={0.01}
+                              max={50}
                               step={0.01}
                               value={[field.value]}
                               onValueChange={(vals) => field.onChange(vals[0])}
@@ -409,7 +432,13 @@ export default function Home() {
                               <Checkbox 
                                 id="balun-1-1" 
                                 checked={field.value === "1:1"}
-                                onCheckedChange={() => field.onChange("1:1")}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    field.onChange("1:1")
+                                  } else if (field.value === "1:1") {
+                                    field.onChange("None") // Uncheck to None
+                                  }
+                                }}
                               />
                               <label htmlFor="balun-1-1" className="text-sm">1:1 Balun</label>
                             </div>
@@ -417,7 +446,13 @@ export default function Home() {
                               <Checkbox 
                                 id="balun-4-1" 
                                 checked={field.value === "4:1"}
-                                onCheckedChange={() => field.onChange("4:1")}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    field.onChange("4:1")
+                                  } else if (field.value === "4:1") {
+                                    field.onChange("None") // Uncheck to None
+                                  }
+                                }}
                               />
                               <label htmlFor="balun-4-1" className="text-sm">4:1 Balun</label>
                             </div>
@@ -425,7 +460,13 @@ export default function Home() {
                               <Checkbox 
                                 id="unun-9-1" 
                                 checked={field.value === "9:1"}
-                                onCheckedChange={() => field.onChange("9:1")}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    field.onChange("9:1")
+                                  } else if (field.value === "9:1") {
+                                    field.onChange("None") // Uncheck to None
+                                  }
+                                }}
                               />
                               <label htmlFor="unun-9-1" className="text-sm">9:1 UnUn</label>
                             </div>
@@ -433,7 +474,13 @@ export default function Home() {
                               <Checkbox 
                                 id="unun-49-1" 
                                 checked={field.value === "49:1"}
-                                onCheckedChange={() => field.onChange("49:1")}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    field.onChange("49:1")
+                                  } else if (field.value === "49:1") {
+                                    field.onChange("None") // Uncheck to None
+                                  }
+                                }}
                               />
                               <label htmlFor="unun-49-1" className="text-sm">49:1 UnUn</label>
                             </div>
@@ -442,45 +489,10 @@ export default function Home() {
                       )}
                     />
 
-                    <Button type="submit" size="sm" className="w-full">Update Design</Button>
                   </form>
                 </Form>
               </CardContent>
             </Card>
-
-            {/* Real-time Physics Display */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Real-time Analysis</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>Antenna Type:</span>
-                  <span className="font-mono">{antennaType}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Impedance:</span>
-                  <span className="font-mono">{PhysicsUtils.formatImpedance(realImpedance.resistance, realImpedance.reactance)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>System Z:</span>
-                  <span className="font-mono">{PhysicsUtils.formatImpedance(systemImpedance.resistance, systemImpedance.reactance)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>SWR (50Ω):</span>
-                  <span className="font-mono">{swr.toFixed(1)}:1</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Physical Length:</span>
-                  <span className="font-mono">{physicalLength.toFixed(2)}m</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Electrical Length:</span>
-                  <span className="font-mono">{antennaModel.electricalLength.toFixed(3)}λ</span>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
         </div>
 
         {/* Performance Analysis */}

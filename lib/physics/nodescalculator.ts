@@ -1,5 +1,5 @@
 ﻿// physics/nodescalculator.js
-import { NODES_CONFIG } from '../config/rendering.ts';
+import { NODES_CONFIG } from './constants';
 
 export class NodesCalculator {
     constructor() {
@@ -8,14 +8,14 @@ export class NodesCalculator {
     }
 
     calculateNodesAndAntinodes(model) {
-        const { length, frequency } = model;
+        const { length, frequency, feedPosition } = model;
         const k = model.waveNumber;
         const electricalLength = model.electricalLength;
         
-        const currentNodes = this._calculateCurrentNodes(length, k);
-        const currentAntinodes = this._calculateCurrentAntinodes(length, k);
-        const voltageNodes = this._calculateVoltageNodes(length, k);
-        const voltageAntinodes = this._calculateVoltageAntinodes(length, k);
+        const currentNodes = this._calculateCurrentNodes(length, k, feedPosition);
+        const currentAntinodes = this._calculateCurrentAntinodes(length, k, feedPosition);
+        const voltageNodes = this._calculateVoltageNodes(length, k, feedPosition);
+        const voltageAntinodes = this._calculateVoltageAntinodes(length, k, feedPosition);
         
         const harmonicNumber = this._getHarmonicNumber(electricalLength);
         
@@ -37,7 +37,8 @@ export class NodesCalculator {
         const impedance = model.calculateImpedance();
         const reactance = impedance.reactance;
         const resistance = impedance.resistance;
-        const isResonant = Math.abs(reactance) < Math.max(15, resistance * 0.2);
+        const { PhysicsUtils } = require('./physicsutils');
+        const isResonant = PhysicsUtils.isResonant(impedance);
         
         if (isResonant) {
             return {
@@ -114,16 +115,24 @@ export class NodesCalculator {
         };
     }
 
-    _calculateCurrentNodes(length, k) {
+    _calculateCurrentNodes(length, k, feedPosition = 0.5) {
         const nodes = [];
         const halfLength = length / 2;
         
-        nodes.push(-halfLength);
-        nodes.push(halfLength);
+        // End-fed antennas have current nodes at the ends
+        if (feedPosition === 0 || feedPosition === 1) {
+            nodes.push(-halfLength);
+            nodes.push(halfLength);
+        } else {
+            // Center-fed and off-center fed have current nodes at wire ends
+            nodes.push(-halfLength);
+            nodes.push(halfLength);
+        }
         
-        for (let n = 0; n < 8; n++) {
+        // Calculate internal current nodes based on standing wave pattern
+        for (let n = 0; n < NODES_CONFIG.MAX_HARMONICS; n++) {
             const nodePosition = ((n + 0.5) * Math.PI) / k;
-            if (nodePosition < halfLength - 0.1) {
+            if (nodePosition < halfLength - NODES_CONFIG.EDGE_BUFFER) {
                 nodes.push(nodePosition);
                 nodes.push(-nodePosition);
             }
@@ -132,15 +141,27 @@ export class NodesCalculator {
         return [...new Set(nodes)].sort((a, b) => a - b);
     }
 
-    _calculateCurrentAntinodes(length, k) {
+    _calculateCurrentAntinodes(length, k, feedPosition = 0.5) {
         const antinodes = [];
         const halfLength = length / 2;
         
-        antinodes.push(0);
+        // Center-fed antennas have current antinode at center
+        if (feedPosition === 0.5) {
+            antinodes.push(0);
+        } else if (feedPosition === 0 || feedPosition === 1) {
+            // End-fed antennas have current antinode at feed point
+            const feedPos = feedPosition === 0 ? -halfLength : halfLength;
+            antinodes.push(feedPos);
+        } else {
+            // Off-center fed has antinode at feed position
+            const feedPos = (feedPosition - 0.5) * length;
+            antinodes.push(feedPos);
+        }
         
-        for (let n = 1; n < 8; n++) {
+        // Calculate internal current antinodes
+        for (let n = 1; n < NODES_CONFIG.MAX_HARMONICS; n++) {
             const antinodePosition = (n * Math.PI) / k;
-            if (antinodePosition < halfLength - 0.1) {
+            if (antinodePosition < halfLength - NODES_CONFIG.EDGE_BUFFER) {
                 antinodes.push(antinodePosition);
                 antinodes.push(-antinodePosition);
             }
@@ -149,15 +170,20 @@ export class NodesCalculator {
         return [...new Set(antinodes)].sort((a, b) => a - b);
     }
 
-    _calculateVoltageNodes(length, k) {
+    _calculateVoltageNodes(length, k, feedPosition = 0.5) {
         const nodes = [];
         const halfLength = length / 2;
         
-        nodes.push(0);
+        // Center-fed antennas have voltage node at center
+        if (feedPosition === 0.5) {
+            nodes.push(0);
+        }
+        // End-fed and off-center fed antennas have different voltage node patterns
         
-        for (let n = 1; n < 8; n++) {
+        // Calculate voltage nodes based on standing wave pattern
+        for (let n = 1; n < NODES_CONFIG.MAX_HARMONICS; n++) {
             const nodePosition = (n * Math.PI) / k;
-            if (nodePosition < halfLength - 0.1) {
+            if (nodePosition < halfLength - NODES_CONFIG.EDGE_BUFFER) {
                 nodes.push(nodePosition);
                 nodes.push(-nodePosition);
             }
@@ -166,16 +192,18 @@ export class NodesCalculator {
         return [...new Set(nodes)].sort((a, b) => a - b);
     }
 
-    _calculateVoltageAntinodes(length, k) {
+    _calculateVoltageAntinodes(length, k, feedPosition = 0.5) {
         const antinodes = [];
         const halfLength = length / 2;
         
+        // All antenna types have voltage antinodes at the wire ends
         antinodes.push(-halfLength);
         antinodes.push(halfLength);
         
-        for (let n = 0; n < 8; n++) {
+        // Calculate internal voltage antinodes
+        for (let n = 0; n < NODES_CONFIG.MAX_HARMONICS; n++) {
             const antinodePosition = ((n + 0.5) * Math.PI) / k;
-            if (antinodePosition < halfLength - 0.1 && antinodePosition > 0.1) {
+            if (antinodePosition < halfLength - NODES_CONFIG.EDGE_BUFFER && antinodePosition > NODES_CONFIG.EDGE_BUFFER) {
                 antinodes.push(antinodePosition);
                 antinodes.push(-antinodePosition);
             }
@@ -192,7 +220,8 @@ export class NodesCalculator {
 
     _isResonant(model) {
         const impedance = model.calculateImpedance();
-        return Math.abs(impedance.reactance) < Math.max(15, impedance.resistance * 0.2);
+        const { PhysicsUtils } = require('./physicsutils');
+        return PhysicsUtils.isResonant(impedance);
     }
 
     getHarmonicName(harmonicNumber) {

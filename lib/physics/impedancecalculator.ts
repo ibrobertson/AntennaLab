@@ -1,5 +1,5 @@
-﻿import { PHYSICS_CONSTANTS, PHYSICS_LIMITS } from './constants.ts';
-import { PhysicsUtils } from './physicsutils.ts';
+﻿import { PHYSICS_CONSTANTS, PHYSICS_LIMITS } from './constants';
+import { PhysicsUtils } from './physicsutils';
 
 export class ImpedanceCalculator {
     constructor() {
@@ -8,16 +8,16 @@ export class ImpedanceCalculator {
 
     calculateImpedance(params) {
         const { length, frequency, feedPosition, wireDiameter } = params;
-        const key = `${length}_${frequency}_${feedPosition}_${wireDiameter}`;
+        const key = `imp_${length.toFixed(3)}_${frequency.toFixed(3)}_${feedPosition.toFixed(3)}_${wireDiameter.toFixed(1)}`;
         
         if (this._cache.has(key)) {
             return this._cache.get(key);
         }
 
-        const wavelength = PHYSICS_CONSTANTS.SPEED_OF_LIGHT / frequency;
+        const wavelength = PHYSICS_CONSTANTS.SPEED_OF_LIGHT / (frequency * 1000000); // MHz to Hz
         const electricalLength = length / wavelength;
         const waveNumber = 2 * Math.PI / wavelength;
-        const wireRadius = wireDiameter / 2000;
+        const wireRadius = (wireDiameter * PHYSICS_CONSTANTS.MM_TO_M) / 2;
         const lengthToRadiusRatio = length / wireRadius;
         
         let impedance;
@@ -40,8 +40,10 @@ export class ImpedanceCalculator {
 
     _calculateCenterFed(length, eLen, k, lToR) {
         if (eLen < 0.1) {
+            // Short dipole formulas - Kraus & Marhefka 4th ed.
             const resistance = Math.max(20 * Math.PI * Math.PI * eLen * eLen, 0.1);
-            const reactance = -119.9 * (PhysicsUtils.log10(lToR) - 2.25) / (eLen * 2 * Math.PI);
+            const reactance = -PHYSICS_CONSTANTS.FREE_SPACE_IMPEDANCE / (2 * Math.PI) * 
+                            (PhysicsUtils.log10(2 * lToR) - 0.577);
             return { resistance, reactance };
         }
         
@@ -58,7 +60,7 @@ export class ImpedanceCalculator {
         const cosBeta = Math.cos(beta);
         
         if (Math.abs(sinBeta) < 0.001) {
-            return { resistance: 2000, reactance: 0 };
+            return { resistance: PHYSICS_CONSTANTS.CURRENT_NULL_RESISTANCE, reactance: 0 };
         }
         
         const resistance = PHYSICS_CONSTANTS.DIPOLE_BASE_RESISTANCE * sinBeta * sinBeta;
@@ -77,7 +79,7 @@ export class ImpedanceCalculator {
         }
         
         if (Math.abs(eLen - 0.5) < 0.02) {
-            return { resistance: 2500, reactance: 0 };
+            return { resistance: PHYSICS_CONSTANTS.HALF_WAVE_END_FED_RESISTANCE, reactance: 0 };
         }
         
         const beta = k * length;
@@ -85,10 +87,10 @@ export class ImpedanceCalculator {
         const sinBeta = Math.sin(beta);
         
         if (Math.abs(sinBeta) < 0.001) {
-            return { resistance: 5000, reactance: 0 };
+            return { resistance: PHYSICS_CONSTANTS.END_FED_HIGH_IMPEDANCE, reactance: 0 };
         }
         
-        const resistance = Math.min(PHYSICS_CONSTANTS.DIPOLE_BASE_RESISTANCE / (cosBeta * cosBeta), 15000);
+        const resistance = Math.min(PHYSICS_CONSTANTS.DIPOLE_BASE_RESISTANCE / (cosBeta * cosBeta), PHYSICS_CONSTANTS.HIGH_IMPEDANCE_LIMIT);
         const reactance = PhysicsUtils.clamp(
             PHYSICS_CONSTANTS.FREE_SPACE_IMPEDANCE * Math.tan(beta / 2), 
             -5000, 

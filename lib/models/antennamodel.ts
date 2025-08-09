@@ -1,8 +1,8 @@
 ﻿// models/antennamodel.ts
-import { PhysicsUtils } from '../physics/physicsutils.ts';
-import { ImpedanceCalculator } from '../physics/impedancecalculator.ts';
-import { MatchingNetworks } from '../physics/matchingnetworks.ts';
-import { PHYSICS_CONSTANTS } from '../physics/constants.ts';
+import { PhysicsUtils } from '../physics/physicsutils';
+import { ImpedanceCalculator } from '../physics/impedancecalculator';
+import { MatchingNetworks } from '../physics/matchingnetworks';
+import { PHYSICS_CONSTANTS } from '../physics/constants';
 
 class AntennaPhysicsEngine {
     constructor() {
@@ -11,7 +11,8 @@ class AntennaPhysicsEngine {
     }
 
     getWavelength(frequency) {
-        return PHYSICS_CONSTANTS.SPEED_OF_LIGHT / frequency;
+        // frequency is in MHz, need to convert to Hz
+        return PHYSICS_CONSTANTS.SPEED_OF_LIGHT / (frequency * 1000000);
     }
 
     getElectricalLength(length, frequency) {
@@ -33,7 +34,7 @@ class AntennaPhysicsEngine {
 
     calculatePhaseRelationship(impedance) {
         const phaseAngle = PhysicsUtils.calculatePhaseAngle(impedance.resistance, impedance.reactance);
-        const isResonant = Math.abs(impedance.reactance) < Math.max(15, impedance.resistance * 0.2);
+        const isResonant = PhysicsUtils.isResonant(impedance);
         
         return {
             phaseAngle,
@@ -87,7 +88,7 @@ class AntennaPhysicsEngine {
     classifyAntennaType(params, impedance) {
         const { feedPosition } = params;
         const electricalLength = this.getElectricalLength(params.length, params.frequency);
-        const isResonant = Math.abs(impedance.reactance) < Math.max(15, impedance.resistance * 0.2);
+        const isResonant = PhysicsUtils.isResonant(impedance);
         
         if (feedPosition === 0.5) {
             return this._classifyCenterFedAntenna(electricalLength, isResonant);
@@ -124,7 +125,7 @@ class AntennaPhysicsEngine {
     }
 
     _getDistributionCacheKey(params, numPoints) {
-        return `dist_${params.length}_${params.frequency}_${numPoints}`;
+        return `dist_${params.length.toFixed(3)}_${params.frequency.toFixed(3)}_${params.feedPosition.toFixed(3)}_${params.wireDiameter}_${numPoints}`;
     }
 
     clearCache() {
@@ -142,8 +143,8 @@ class AntennaPhysicsEngine {
 
 export class AntennaModel {
     constructor() {
-        this.length = 20;
-        this.frequency = 7.5;
+        this.length = 10.6;  // Default half-wave dipole at 14.2 MHz
+        this.frequency = 14.2;  // 20m amateur band
         this.feedPosition = 0.5;
         this.wireDiameter = 2;
         this.matchingNetwork = null;

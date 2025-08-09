@@ -1,4 +1,4 @@
-﻿import { MATCHING_NETWORKS } from './constants.ts';
+﻿import { MATCHING_NETWORKS } from './constants';
 
 export class MatchingNetworks {
     static applyMatching(impedance, networkType) {

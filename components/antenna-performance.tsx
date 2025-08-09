@@ -20,23 +20,107 @@ interface AntennaData {
 
 interface AntennaPerformanceProps {
   antennaData: AntennaData
+  antennaModel?: any  // Real physics model
   resonantFrequency: number
   wavelength: number
   feedImpedance: number
   physicalLength: number
+  realImpedance?: any  // Real calculated impedance
+  systemImpedance?: any  // Impedance after matching network
+  swr?: number  // Real calculated SWR
+  antennaType?: string  // Real antenna type classification
 }
 
 export default function AntennaPerformance({ 
-  antennaData, 
+  antennaData,
+  antennaModel,
   resonantFrequency, 
   wavelength,
   feedImpedance,
-  physicalLength
+  physicalLength,
+  realImpedance,
+  systemImpedance,
+  swr,
+  antennaType: realAntennaType
 }: AntennaPerformanceProps) {
   const [activeTab, setActiveTab] = useState("radiation")
 
-  // Calculate wavelength in meters
-  const calculatedWavelength = 299.792458 / antennaData.frequency // c/f in m
+  // Use real physics data when available
+  const useRealPhysics = antennaModel && realImpedance && systemImpedance
+
+  // Calculate nodes and antinodes using real physics
+  const calculateNodesAndAntinodes = () => {
+    if (!antennaModel) {
+      // Fallback to approximate calculations
+      return {
+        currentNodes: Math.max(2, Math.floor(antennaData.elementLength * 2)),
+        voltageNodes: Math.max(1, Math.floor(antennaData.elementLength * 2) + 1),
+        currentAntinodes: Math.max(1, Math.floor(antennaData.elementLength * 2) - 1),
+        voltageAntinodes: Math.max(2, Math.floor(antennaData.elementLength * 2))
+      }
+    }
+
+    // Use the same improved NodesCalculator as the visualization
+    const k = antennaModel.waveNumber
+    const length = antennaModel.length
+    const halfLength = length / 2
+    const wavelength = 2 * Math.PI / k
+    const electricalLength = length / wavelength
+
+    // Calculate current nodes (I = 0) - improved algorithm
+    const currentNodes = []
+    currentNodes.push(-halfLength, halfLength) // Always at ends
+    const maxNodes = Math.ceil(electricalLength * 4) // Scale with antenna length
+    const edgeBuffer = Math.min(0.1, wavelength * 0.05) // Proportional edge buffer
+    
+    for (let n = 0; n < maxNodes; n++) {
+      const nodePosition = ((n + 0.5) * Math.PI) / k
+      if (nodePosition < halfLength - edgeBuffer) {
+        currentNodes.push(nodePosition, -nodePosition)
+      }
+    }
+
+    // Calculate current antinodes (I = max) - improved algorithm
+    const currentAntinodes = [0] // Always at center
+    const maxAntinodes = Math.ceil(electricalLength * 4) // Scale with antenna length
+    
+    for (let n = 1; n < maxAntinodes; n++) {
+      const antinodePosition = (n * Math.PI) / k
+      if (antinodePosition < halfLength - edgeBuffer) {
+        currentAntinodes.push(antinodePosition, -antinodePosition)
+      }
+    }
+
+    // Calculate voltage nodes (V = 0) - improved algorithm
+    const voltageNodes = [0] // Always at center
+    for (let n = 1; n < maxNodes; n++) {
+      const nodePosition = (n * Math.PI) / k
+      if (nodePosition < halfLength - edgeBuffer) {
+        voltageNodes.push(nodePosition, -nodePosition)
+      }
+    }
+
+    // Calculate voltage antinodes (V = max) - improved algorithm
+    const voltageAntinodes = []
+    voltageAntinodes.push(-halfLength, halfLength) // Always at ends
+    const centerBuffer = Math.max(0.1, wavelength * 0.05) // Avoid center overlap
+    
+    for (let n = 0; n < maxAntinodes; n++) {
+      const antinodePosition = ((n + 0.5) * Math.PI) / k
+      if (antinodePosition < halfLength - edgeBuffer && antinodePosition > centerBuffer) {
+        voltageAntinodes.push(antinodePosition, -antinodePosition)
+      }
+    }
+
+    return {
+      currentNodes: [...new Set(currentNodes)].length,
+      voltageNodes: [...new Set(voltageNodes)].length,
+      currentAntinodes: [...new Set(currentAntinodes)].length,
+      voltageAntinodes: [...new Set(voltageAntinodes)].length
+    }
+  }
+
+  const nodesData = calculateNodesAndAntinodes()
 
   // Calculate simulated performance metrics based on antenna parameters
   const calculateGain = () => {
@@ -83,9 +167,9 @@ export default function AntennaPerformance({
 
   const gain = calculateGain()
   
-  // Calculate SWR based on antenna parameters
-  const calculateSWR = () => {
-    // Optimal length for resonance is 0.5λ for dipole
+  // Use real SWR or calculate if not available
+  const finalSWR = (swr !== undefined && swr !== null) ? swr : (() => {
+    // Fallback SWR calculation (simplified model)
     let optimalLength = 0
     
     switch (antennaData.type) {
@@ -108,23 +192,16 @@ export default function AntennaPerformance({
         optimalLength = 0.5
     }
     
-    // Calculate how far we are from optimal length
     const lengthRatio = antennaData.elementLength / optimalLength
     const deviation = Math.abs(1 - lengthRatio)
+    let swrValue = 1 + deviation * 5
     
-    // SWR calculation (simplified model)
-    // Perfect match would be 1:1
-    let swr = 1 + deviation * 5
-    
-    // Feed point affects matching
-    if (antennaData.feedPoint === 50 && (antennaData.type === "dipole" || antennaData.type === "yagi")) { // Changed from "center" to 50
-      swr *= 0.9 // Better match for center-fed dipoles
+    if (antennaData.feedPoint === 50 && (antennaData.type === "dipole" || antennaData.type === "yagi")) {
+      swrValue *= 0.9
     }
     
-    return Math.min(10, Math.max(1, swr)) // Clamp between 1 and 10
-  }
-
-  const swr = calculateSWR()
+    return Math.min(10, Math.max(1, swrValue))
+  })()
   
   // Calculate bandwidth based on antenna type and parameters
   const calculateBandwidth = () => {
@@ -227,7 +304,7 @@ export default function AntennaPerformance({
       const deviation = Math.abs(freq - centerFreq) / centerFreq
       
       // SWR increases as we move away from center frequency
-      let swrValue = swr + deviation * 20
+      let swrValue = finalSWR + deviation * 20
       
       // Add some randomness for realism
       swrValue += (Math.random() - 0.5) * 0.5
@@ -241,54 +318,59 @@ export default function AntennaPerformance({
     return data
   }
 
-  // Generate impedance vs frequency data
+  // Generate impedance vs frequency data using real physics when available
   const generateImpedanceData = () => {
     const points = 21
     const centerFreq = antennaData.frequency
     const freqSpan = bandwidth * 2
     const data = []
     
-    // Base impedance depends on antenna type and feed point
-    let baseResistance = 73 // Dipole in free space
+    // Get base impedance from real physics or fallback
+    let baseResistance = 73
+    let baseReactance = 0
     
-    switch (antennaData.type) {
-      case "dipole":
-        baseResistance = 73
-        break
-      case "yagi":
-        baseResistance = 50 + 10 * Math.log10(antennaData.elements)
-        break
-      case "patch":
-        baseResistance = 50 + 20 * antennaData.elementLength
-        break
-      case "logperiodic":
-        baseResistance = 60 + 5 * antennaData.elements
-        break
-      case "helical":
-        baseResistance = 140
-        break
-      default:
-        baseResistance = 73
-    }
-    
-    // Feed point adjustment
-    if (antennaData.feedPoint === 25) { // Assuming 25% is an "offset" example
-      baseResistance *= 0.8
-    } else if (antennaData.feedPoint === 0 || antennaData.feedPoint === 100) { // Assuming 0% or 100% is "end"
-      baseResistance *= 2.5
+    if (useRealPhysics && realImpedance) {
+      baseResistance = realImpedance.resistance
+      baseReactance = realImpedance.reactance
+    } else {
+      // Fallback calculations
+      switch (antennaData.type) {
+        case "dipole":
+          baseResistance = 73
+          break
+        case "yagi":
+          baseResistance = 50 + 10 * Math.log10(antennaData.elements)
+          break
+        case "patch":
+          baseResistance = 50 + 20 * antennaData.elementLength
+          break
+        case "logperiodic":
+          baseResistance = 60 + 5 * antennaData.elements
+          break
+        case "helical":
+          baseResistance = 140
+          break
+        default:
+          baseResistance = 73
+      }
+      
+      // Feed point adjustment
+      if (antennaData.feedPoint === 25) {
+        baseResistance *= 0.8
+      } else if (antennaData.feedPoint === 0 || antennaData.feedPoint === 100) {
+        baseResistance *= 2.5
+      }
     }
     
     for (let i = 0; i < points; i++) {
       const freq = centerFreq - freqSpan / 2 + (i * freqSpan) / (points - 1)
-      
-      // Calculate frequency deviation from center
       const deviation = (freq - centerFreq) / centerFreq
       
-      // Resistance varies less than reactance with frequency
-      const resistance = baseResistance * (1 + deviation * 0.5)
+      // Resistance varies less with frequency
+      const resistance = baseResistance * (1 + deviation * 0.3)
       
-      // Reactance varies more with frequency and crosses zero at resonance
-      const reactance = deviation * baseResistance * 2
+      // Reactance varies more and crosses zero at resonance
+      const reactance = baseReactance + (deviation * baseResistance * 1.5)
       
       data.push({
         frequency: freq.toFixed(1),
@@ -332,7 +414,7 @@ export default function AntennaPerformance({
           </div>
           <div>
             <div className="text-xs text-muted-foreground">SWR</div>
-            <div className="text-lg font-bold">{swr.toFixed(2)}:1</div>
+            <div className="text-lg font-bold">{finalSWR.toFixed(2)}:1</div>
           </div>
           <div>
             <div className="text-xs text-muted-foreground">Bandwidth</div>
@@ -344,7 +426,25 @@ export default function AntennaPerformance({
           </div>
           <div>
             <div className="text-xs text-muted-foreground">Antenna Impedance</div>
-            <div className="text-lg font-bold">{feedImpedance}Ω</div>
+            <div className="text-lg font-bold">
+              {useRealPhysics && realImpedance ? 
+                `${realImpedance.resistance.toFixed(1)} ${realImpedance.reactance >= 0 ? '+' : ''}${realImpedance.reactance.toFixed(1)}j Ω` :
+                `${feedImpedance}Ω`
+              }
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">System Impedance</div>
+            <div className="text-lg font-bold">
+              {useRealPhysics && systemImpedance ? 
+                `${systemImpedance.resistance.toFixed(1)} ${systemImpedance.reactance >= 0 ? '+' : ''}${systemImpedance.reactance.toFixed(1)}j Ω` :
+                `${feedImpedance}Ω`
+              }
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Antenna Type</div>
+            <div className="text-lg font-bold">{realAntennaType || antennaData.type}</div>
           </div>
           <div>
             <div className="text-xs text-muted-foreground">Matching Network</div>
@@ -355,8 +455,13 @@ export default function AntennaPerformance({
             <div className="text-lg font-bold">{physicalLength.toFixed(2)}m</div>
           </div>
           <div>
-            <div className="text-xs text-muted-foreground">Resonant Frequency</div>
-            <div className="text-lg font-bold">{resonantFrequency.toFixed(2)} MHz</div>
+            <div className="text-xs text-muted-foreground">Electrical Length</div>
+            <div className="text-lg font-bold">
+              {antennaModel ? 
+                `${antennaModel.electricalLength.toFixed(3)}λ` :
+                `${(antennaData.elementLength / wavelength).toFixed(3)}λ`
+              }
+            </div>
           </div>
           <div>
             <div className="text-xs text-muted-foreground">Wavelength</div>
@@ -364,11 +469,47 @@ export default function AntennaPerformance({
           </div>
           <div>
             <div className="text-xs text-muted-foreground">Current Nodes</div>
-            <div className="text-lg font-bold">{Math.floor(antennaData.elementLength * 2)}</div>
+            <div className="text-lg font-bold">{nodesData.currentNodes}</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Current Antinodes</div>
+            <div className="text-lg font-bold">{nodesData.currentAntinodes}</div>
           </div>
           <div>
             <div className="text-xs text-muted-foreground">Voltage Nodes</div>
-            <div className="text-lg font-bold">{Math.floor(antennaData.elementLength * 2) + 1}</div>
+            <div className="text-lg font-bold">{nodesData.voltageNodes}</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Voltage Antinodes</div>
+            <div className="text-lg font-bold">{nodesData.voltageAntinodes}</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Impedance Magnitude</div>
+            <div className="text-lg font-bold">
+              {useRealPhysics && realImpedance ? 
+                `${Math.sqrt(realImpedance.resistance ** 2 + realImpedance.reactance ** 2).toFixed(1)} Ω` :
+                `${feedImpedance} Ω`
+              }
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Phase Angle</div>
+            <div className="text-lg font-bold">
+              {useRealPhysics && realImpedance ? 
+                `${(Math.atan2(realImpedance.reactance, realImpedance.resistance) * 180 / Math.PI).toFixed(1)}°` :
+                `0.0°`
+              }
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Reactance Type</div>
+            <div className="text-lg font-bold">
+              {useRealPhysics && realImpedance ? 
+                (realImpedance.reactance > 15 ? "Inductive" : 
+                 realImpedance.reactance < -15 ? "Capacitive" : "Resistive") :
+                "Resistive"
+              }
+            </div>
           </div>
         </div>
       </div>

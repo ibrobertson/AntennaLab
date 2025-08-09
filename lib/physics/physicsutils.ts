@@ -27,5 +27,13 @@
 
     calculateImpedanceMagnitude: (resistance, reactance) => {
         return Math.sqrt(resistance * resistance + reactance * reactance);
+    },
+
+    isResonant: (impedance) => {
+        const { RESONANCE_REACTANCE_THRESHOLD, RESONANCE_PERCENTAGE_THRESHOLD } = require('./constants').PHYSICS_CONSTANTS;
+        return Math.abs(impedance.reactance) < Math.max(
+            RESONANCE_REACTANCE_THRESHOLD, 
+            impedance.resistance * RESONANCE_PERCENTAGE_THRESHOLD
+        );
     }
 };
